@@ -721,7 +721,8 @@ static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 	if (need_resched())
 		goto exit;
 
-	success = psci_enter_sleep(cpu, idx, true);
+	wfi();
+	success = true;
 
 exit:
 	end_time = ktime_to_ns(ktime_get());
