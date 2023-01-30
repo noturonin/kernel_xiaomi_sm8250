@@ -432,6 +432,7 @@ struct usbpd {
 	struct notifier_block	psy_nb;
 
 	bool			batt_2s;
+	bool			fix_pdo_5v;
 
 	int			bms_charge_full;
 	int			bat_voltage_max;
@@ -501,6 +502,8 @@ struct usbpd {
 	int                     last_pdo;
 	int                     last_uv;
 	int                     last_ua;
+	int			apdo_max;
+	int			power_max;
 	u64			monitor_entry_time;
 
 	/* non-qcom pps control */
@@ -777,6 +780,7 @@ static inline void pd_reset_protocol(struct usbpd *pd)
 	memset(pd->rx_msgid, -1, sizeof(pd->rx_msgid));
 	memset(pd->tx_msgid, 0, sizeof(pd->tx_msgid));
 	pd->send_request = false;
+	pd->send_get_status = false;
 	pd->send_pr_swap = false;
 	pd->send_dr_swap = false;
 }
@@ -1013,7 +1017,7 @@ static int pd_select_pdo_for_bq(struct usbpd *pd, int pdo_pos, int uv, int ua)
 			ua = MAX_NON_COMPLIANT_PPS_UA;
 			curr = ua / 1000;
 		}
-		usbpd_err(&pd->dev, " select uv (%d) and ua (%d) of APDO\n", uv, ua);
+		/*usbpd_err(&pd->dev, " select uv (%d) and ua (%d) of APDO\n", uv, ua);*/
 
 		pd->requested_voltage = uv;
 		pd->rdo = PD_RDO_AUGMENTED(pdo_pos, mismatch, 1, 1,
@@ -1022,7 +1026,7 @@ static int pd_select_pdo_for_bq(struct usbpd *pd, int pdo_pos, int uv, int ua)
 		usbpd_err(&pd->dev, "Only Fixed or Programmable PDOs supported\n");
 		return -ENOTSUPP;
 	}
-	usbpd_info(&pd->dev, "pdo:%d, uv:%d, ua:%d\n", pdo_pos, uv, ua);
+	usbpd_info(&pd->dev, "pdo_set:%d, uv:%d, ua:%d\n", pdo_pos, uv, ua);
 
 	pd->requested_current = curr;
 	pd->requested_pdo = pdo_pos;
@@ -1057,6 +1061,8 @@ static int pd_eval_src_caps(struct usbpd *pd)
 	/* Select thr first PDO for zimi adapter*/
 	if (pd->batt_2s && pd->adapter_id == 0xA819)
 		pd_select_pdo(pd, 2, 0, 0);
+	else if (pd->request_reject == 1)
+		;
 	else
 		pd_select_pdo(pd, 1, 0, 0);
 
@@ -3735,6 +3741,7 @@ static void handle_disconnect(struct usbpd *pd)
 	pd->forced_pr = POWER_SUPPLY_TYPEC_PR_NONE;
 
 	pd->current_state = PE_UNKNOWN;
+	pd_reset_protocol(pd);
 
 	kobject_uevent(&pd->dev.kobj, KOBJ_CHANGE);
 	typec_unregister_partner(pd->partner);
@@ -3797,10 +3804,11 @@ static void usbpd_sm(struct work_struct *w)
 	int ret;
 	struct rx_msg *rx_msg = NULL;
 	unsigned long flags;
-
+	/*
 	usbpd_err(&pd->dev, "typec mode:%d, pr:%d, handle state %s\n",
 			pd->typec_mode, pd->current_pr,
 			usbpd_state_strings[pd->current_state]);
+	*/
 
 	/* Register typec partner in case AAA is connected */
 	if (pd->typec_mode == POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER) {
@@ -4844,7 +4852,7 @@ static ssize_t usbpd_verifed_store(struct device *dev,
 		}
 	}
 
-	if (!pd->verifed && !pd->pps_found)
+	if (!pd->verifed && !pd->pps_found && !pd->fix_pdo_5v)
 		schedule_delayed_work(&pd->fixed_pdo_work, 5 * HZ);
 
 	return size;
@@ -5558,10 +5566,15 @@ static void usbpd_pdo_workfunc(struct work_struct *w)
 	int passthrough_curr_max = 0;
 	union power_supply_propval val = {0};
 	int pps_max_watts = 0;
+	int pps_max_mwatt = 0;
 
 	for (i = 0; i < ARRAY_SIZE(pd->received_pdos); i++) {
 		u32 pdo = pd->received_pdos[i];
 
+		if (pd->received_pdos[1] == 0) {
+			pd->fix_pdo_5v = true;
+			usbpd_info(&pd->dev,"fixed pdo [2]= %d", pd->fix_pdo_5v);
+		}
 		if (pdo == 0)
 			break;
 
@@ -5581,14 +5594,31 @@ static void usbpd_pdo_workfunc(struct work_struct *w)
 			}
 			if (pps_max_watts < max_volt * max_curr) {
 				pps_max_watts = max_volt * max_curr;
+				if(pps_max_watts >120000000 && pps_max_watts < 130000000)
+					pps_max_watts = 120000000;
 				if (pps_max_watts < USBPD_WEAK_PPS_POWER) {
 					pd->pps_weak_limit = true;
 					usbpd_info(&pd->dev, "weak pps detect\n");
 				}
 			}
+			pd->pps_found = true;
+			pd->pps_insert = true;
+		}
 		usbpd_info(&pd->dev, "%s max_volt:%d,min_volt:%d,max_curr:%d\n",
 				(PD_SRC_PDO_TYPE(pdo) == PD_SRC_PDO_TYPE_AUGMENTED) ? "PPS" : "PD2.0",
 				max_volt, min_volt, max_curr);
+	}
+
+	if (pd->verifed) {
+		pps_max_mwatt = pps_max_watts / 1000  / 1000;
+		if (pps_max_mwatt != pd->apdo_max) {
+			pd->apdo_max = pps_max_mwatt;
+			//val.intval = pps_max_mwatt;
+			val.intval = min(pps_max_mwatt, pd->power_max);
+			power_supply_set_property(pd->usb_psy,
+					POWER_SUPPLY_PROP_APDO_MAX, &val);
+			usbpd_err(&pd->dev, "pps_max_watts[%d]\n", pps_max_mwatt);
+		}
 	}
 
 	if (pd->batt_2s) {
@@ -5799,6 +5829,10 @@ struct usbpd *usbpd_create(struct device *parent)
 
 	pd->non_qcom_pps_ctr = of_property_read_bool(parent->of_node,
 				"mi,non-qcom-pps-ctrl");
+
+	of_property_read_u32(parent->of_node, "mi,pd-power-max", &pd->power_max);
+	usbpd_info(&pd->dev, "pd-power-max:%d\n", pd->power_max);
+
 	if (pd->num_sink_caps > 0) {
 		int i;
 		u32 sink_caps[14];
