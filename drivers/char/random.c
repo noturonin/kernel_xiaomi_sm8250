@@ -604,6 +604,7 @@ struct fast_pool {
 	unsigned long	last;
 	unsigned short	reg_idx;
 	unsigned char	count;
+	struct timer_list mix;
 };
 
 /*
