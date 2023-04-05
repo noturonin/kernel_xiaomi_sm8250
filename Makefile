@@ -704,31 +704,78 @@ KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, address-of-packed-member)
 
 ifeq ($(CONFIG_CC_OPTIMIZE_FOR_SIZE), y)
-ifeq ($(cc-name),clang)
+
+alioth_flags := := -mcpu=cortex-a77 \
+		 -mllvm -polly \
+		 -mllvm -polly-run-inliner \
+		 -mllvm -polly-optimizer=isl \
+		 -mllvm -polly-enable-simplify \
+		 -mllvm -polly-vectorizer=polly \
+		 -mllvm -polly-detect-keep-going \
+		 -mllvm -polly-code-generation=full \
+		 -mllvm -polly-isl-arg=--no-schedule-serialize-sccs
+
 KBUILD_CFLAGS   += -O3
 KBUILD_AFLAGS   += -O3
 KBUILD_LDFLAGS  += -O3
 else
-KBUILD_CFLAGS   += -O2
+KBUILD_CFLAGS   += -O3
 KBUILD_AFLAGS   += -O2
 KBUILD_LDFLAGS  += -O2
+ifdef CONFIG_POLLY_CLANG
+POLLY_FLAGS	+= -mllvm -polly \
+		   -mllvm -polly-ast-use-context \
+		   -mllvm -polly-detect-keep-going \
+		   -mllvm -polly-run-inliner \
+		   -mllvm -polly-vectorizer=stripmine
+
+ifeq ($(shell test $(CONFIG_CLANG_VERSION) -lt 160000; echo $$?),0)
+POLLY_FLAGS	+= -mllvm -polly-invariant-load-hoisting
+endif
+
+ifeq ($(shell test $(CONFIG_CLANG_VERSION) -gt 130000; echo $$?),0)
+POLLY_FLAGS	+= -mllvm -polly-loopfusion-greedy=1 \
+	     -mllvm -polly-reschedule=1 \
+	     -mllvm -polly-postopts=1 \
+	     -mllvm -polly-num-threads=0 \
+	     -mllvm -polly-omp-backend=LLVM \
+	     -mllvm -polly-scheduling=dynamic \
+	     -mllvm -polly-scheduling-chunksize=1
+else
+POLLY_FLAGS	+= -mllvm -polly-opt-fusion=max
+endif
+
+# Polly may optimise loops with dead paths beyound what the linker
+# can understand. This may negate the effect of the linker's DCE
+# so we tell Polly to perfom proven DCE on the loops it optimises
+# in order to preserve the overall effect of the linker's DCE.
+ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION
+POLLY_FLAGS	+= -mllvm -polly-run-dce
+endif
+KBUILD_CFLAGS += $(POLLY_FLAGS)
+KBUILD_AFLAGS += $(POLLY_FLAGS)
+KBUILD_LDFLAGS	+= $(POLLY_FLAGS)
 endif
 endif
 
-ifdef CONFIG_LLVM_POLLY
+# Enable Clang Polly optimizations
 KBUILD_CFLAGS	+= -mllvm -polly \
+                   -mllvm -polly-omp-backend=LLVM \
+                   -mllvm -polly-num-threads=0 \
+                   -mllvm -polly-scheduling=dynamic \
+                   -mllvm -polly-scheduling-chunksize=1 \
+                   -mllvm -polly-postopts=1 \
+                   -mllvm -polly-reschedule=1 \
+                   -mllvm -polly-loopfusion-greedy=1 \
+		   -mllvm -polly-run-dce \
 		   -mllvm -polly-run-inliner \
 		   -mllvm -polly-ast-use-context \
 		   -mllvm -polly-detect-keep-going \
 		   -mllvm -polly-vectorizer=stripmine \
 		   -mllvm -polly-invariant-load-hoisting
 
-ifeq ($(shell test $(CONFIG_CLANG_VERSION) -gt 130000; echo $$?),0)
-POLLY_FLAGS	+= -mllvm -polly-loopfusion-greedy=1
-else
-POLLY_FLAGS += -mllvm -polly-opt-fusion=max
-endif
-endif
+# Tell compiler to use pipes instead of temporary files during compilation
+KBUILD_CFLAGS += $(call cc-option, -pipe)
 
 # Tell gcc to never replace conditional load with a non-conditional one
 KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
