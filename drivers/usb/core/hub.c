@@ -150,7 +150,7 @@ struct usb_hub *usb_hub_to_struct_hub(struct usb_device *hdev)
 int usb_device_supports_lpm(struct usb_device *udev)
 {
 	/* Some devices have trouble with LPM  so can't support LPM */
-		return 0;
+	return 0;
 
 	/* USB 2.1 (and greater) devices indicate LPM support through
 	 * their USB 2.0 Extended Capabilities BOS descriptor.
@@ -2187,6 +2187,15 @@ void usb_disconnect(struct usb_device **pdev)
 	dev_info(&udev->dev, "USB disconnect, device number %d\n",
 			udev->devnum);
 
+	if(udev->parent){
+		hub = usb_hub_to_struct_hub(udev->parent);
+		if(hub->asuspend && hub->addr_number == udev->devnum){
+			hub->asuspend = 0;
+			hub->addr_number = 0;
+			dev_info(&udev->dev,"usb_disconnect reset asuspend and addr_number\n");
+		}
+	}
+
 	/*
 	 * Ensure that the pm runtime code knows that the USB device
 	 * is in the process of being disconnected.
@@ -2487,6 +2496,7 @@ static void set_usb_port_removable(struct usb_device *udev)
 int usb_new_device(struct usb_device *udev)
 {
 	int err;
+	struct usb_hub *temp_hub = NULL;
 
 	if (udev->parent) {
 		/* Initialize non-root-hub device wakeup to disabled;
@@ -2519,6 +2529,14 @@ int usb_new_device(struct usb_device *udev)
 
 	/* Tell the world! */
 	announce_device(udev);
+
+	if (udev->parent){
+		temp_hub = usb_hub_to_struct_hub(udev->parent);
+		if(le16_to_cpu(udev->descriptor.idVendor) == 0x0bda && 0x4b79 == le16_to_cpu(udev->descriptor.idProduct)){
+			temp_hub->asuspend = 1;
+			temp_hub->addr_number = udev->devnum;
+		}
+	}
 
 	if (udev->serial)
 		add_device_randomness(udev->serial, strlen(udev->serial));
@@ -3580,7 +3598,7 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 		}
 
 		/* TRSMRCY = 10 msec */
-		msleep(10);
+		usleep_range(10000, 10500);
 	}
 
 	if (udev->persist_enabled)
@@ -4902,7 +4920,8 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 	/* notify HCD that we have a device connected and addressed */
 	if (hcd->driver->update_device)
 		hcd->driver->update_device(hcd, udev);
-	if (0)
+	/*skip this initial*/
+	if (!IS_ENABLED(CONFIG_BOARD_XIAOMI))
 		hub_set_initial_usb2_lpm_policy(udev);
 fail:
 	if (retval) {
@@ -5883,7 +5902,7 @@ re_enumerate_no_bos:
  *
  * Return: The same as for usb_reset_and_verify_device().
  * However, if a reset is already in progress (for instance, if a
- * driver doesn't have pre_ or post_reset() callbacks, and while
+ * driver doesn't have pre_reset() or post_reset() callbacks, and while
  * being unbound or re-bound during the ongoing reset its disconnect()
  * or probe() routine tries to perform a second, nested reset), the
  * routine returns -EINPROGRESS.
@@ -5919,10 +5938,6 @@ int usb_reset_device(struct usb_device *udev)
 		dev_dbg(&udev->dev, "%s for root hub!\n", __func__);
 		return -EISDIR;
 	}
-
-	if (udev->reset_in_progress)
-		return -EINPROGRESS;
-	udev->reset_in_progress = 1;
 
 	port_dev = hub->ports[udev->portnum - 1];
 
@@ -5988,7 +6003,6 @@ int usb_reset_device(struct usb_device *udev)
 
 	usb_autosuspend_device(udev);
 	memalloc_noio_restore(noio_flag);
-	udev->reset_in_progress = 0;
 	return ret;
 }
 EXPORT_SYMBOL_GPL(usb_reset_device);

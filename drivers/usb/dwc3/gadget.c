@@ -319,6 +319,9 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 
 	dwc3_gadget_del_and_unmap_request(dep, req, status);
 
+	if (!dep->endpoint.desc)
+		return;
+
 	if (usb_endpoint_xfer_isoc(dep->endpoint.desc) &&
 					(list_empty(&dep->started_list))) {
 		dep->flags |= DWC3_EP_PENDING_REQUEST;
@@ -1275,7 +1278,6 @@ static void __dwc3_prepare_one_trb(struct dwc3_ep *dep, struct dwc3_trb *trb,
 	 * Add a write memory barrier to prevent CPU re-ordering.
 	 */
 	wmb();
-
 	trb->ctrl |= DWC3_TRB_CTRL_HWO;
 
 	dwc3_ep_inc_enq(dep);
@@ -2088,6 +2090,8 @@ static int dwc3_gadget_wakeup_int(struct dwc3 *dwc)
 	switch (link_state) {
 	case DWC3_LINK_STATE_RX_DET:	/* in HS, means Early Suspend */
 	case DWC3_LINK_STATE_U3:	/* in HS, means SUSPEND */
+	case DWC3_LINK_STATE_U2:	/* in HS, means Sleep (L1) */
+	case DWC3_LINK_STATE_RESUME:
 		break;
 	case DWC3_LINK_STATE_U1:
 		if (dwc->gadget.speed != USB_SPEED_SUPER) {
@@ -4436,6 +4440,8 @@ int dwc3_gadget_suspend(struct dwc3 *dwc)
 	dwc3_gadget_run_stop(dwc, false, false);
 	dwc3_disconnect_gadget(dwc);
 	__dwc3_gadget_stop(dwc);
+
+	synchronize_irq(dwc->irq_gadget);
 
 	return 0;
 }

@@ -5952,3 +5952,4 @@ module_exit(usbpd_exit);
 
 MODULE_DESCRIPTION("USB Power Delivery Policy Engine");
 MODULE_LICENSE("GPL v2");
+
