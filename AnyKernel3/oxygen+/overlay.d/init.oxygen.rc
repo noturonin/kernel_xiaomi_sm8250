@@ -2,6 +2,7 @@ on property:sys.boot_completed=1
    exec u:r:init:s0 root root -- /init.oxygen.sh
    exec u:r:su:s0 root root -- /init.oxygen.sh
  
+   chown system system /sys/class/thermal/thermal_message/sconfig
    setprop spectrum.support 1
    setprop persist.spectrum.profile default
          setprop persist.spectrum.kernel Oxygen+
@@ -34,7 +35,7 @@ on property:persist.spectrum.profile=0
    write /sys/devices/system/cpu/cpu6/cpufreq/scaling_max_freq 2246400
    write /sys/devices/system/cpu/cpu7/cpufreq/scaling_max_freq 2419200
    chmod 660 /sys/class/thermal/thermal_message/sconfig
-   write /sys/class/thermal/thermal_message/sconfig 10
+   write /sys/class/thermal/thermal_message/sconfig 0
    chmod 444 /sys/class/thermal/thermal_message/sconfig
    
 #perf
@@ -51,7 +52,7 @@ on property:persist.spectrum.profile=1
    write /sys/devices/system/cpu/cpu6/cpufreq/scaling_max_freq 2419200
    write /sys/devices/system/cpu/cpu7/cpufreq/scaling_max_freq 2841600
    chmod 660 /sys/class/thermal/thermal_message/sconfig
-   write /sys/class/thermal/thermal_message/sconfig 16
+   write /sys/class/thermal/thermal_message/sconfig 10
    chmod 444 /sys/class/thermal/thermal_message/sconfig
    
    
@@ -87,5 +88,5 @@ on property:persist.spectrum.profile=3
    write /sys/devices/system/cpu/cpu6/cpufreq/scaling_max_freq 2246400
    write /sys/devices/system/cpu/cpu7/cpufreq/scaling_max_freq 2745600
    chmod 660 /sys/class/thermal/thermal_message/sconfig
-   write /sys/class/thermal/thermal_message/sconfig 13
+   write /sys/class/thermal/thermal_message/sconfig 16
    chmod 444 /sys/class/thermal/thermal_message/sconfig
