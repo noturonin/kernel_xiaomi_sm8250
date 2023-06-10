@@ -48,7 +48,7 @@ void target_if_vdev_mgr_handle_recovery(struct wlan_objmgr_psoc *psoc,
 				wlan_psoc_get_id(psoc), vdev_id);
 }
 
-void target_if_vdev_mgr_rsp_timer_cb(struct vdev_response_timer *vdev_rsp)
+QDF_STATUS target_if_vdev_mgr_rsp_timer_cb(struct vdev_response_timer *vdev_rsp)
 {
 	struct wlan_objmgr_psoc *psoc;
 	struct wlan_lmac_if_mlme_rx_ops *rx_ops;
